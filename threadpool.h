@@ -11,6 +11,7 @@
 #include <stack>
 #include <cassert>
 #include <queue>
+#include <deque>
 
 #include <pcosynchro/pcologger.h>
 #include <pcosynchro/pcothread.h>
@@ -43,27 +44,75 @@ public:
 class ThreadPool
 {
 public:
-    ThreadPool(int maxThreadCount, int maxNbWaiting){
+    ThreadPool(int maxThreadCount, int maxNbWaiting)
+        :nbThread(0), nbWaitingThread(0),nbWaitingRunnable(0),
+         threadPoolFinish(false), runnableIsWaiting(false)
+    {
         this->maxThreadCount = maxThreadCount;
         this->maxNbWaiting = maxNbWaiting;
     }
 
+    ~ThreadPool(){
+        //-Si on détruit le thread pool, on doit laisser tous les threads finirent
+        // leur calculs avant de se terminer, si un thread est en attente, on
+        // le réveille et on le termine.
+        threadPoolFinish = true;
+
+        if(nbWaitingThread > 0){
+            cond.notifyAll();
+        }
+
+        for(PcoThread* const &t: threadQueue){
+            t->join();
+            delete t;
+        }
+    }
+
     void processRunnable(Runnable* runnable){
-        runnable->run();
+        mutex.lock();
+        bool first = true;
+        mutex.unlock();
 
         while(1){
 
+             mutex.lock();
              nbWaitingThread++;
-             while(!runnableIsWaiting){
+             mutex.unlock();
+
+             while(runnableIsWaiting == false){
                  cond.wait(&mutex);
              }
 
+             mutex.lock();
+
+             runnableIsWaiting = false;
+
              nbWaitingThread--;
 
-             runnable = RunnableQueue.front();
-             RunnableQueue.pop();
-             nbWaitingRunnable--;
+             //Sortir de la boucle while
+             if(threadPoolFinish == true && nbWaitingRunnable == 0){
+                 mutex.unlock();
+                 break;
+             }
+
+             //Si c'est le premier thread, on va pas dans la Queue
+             if(first == false){
+                 runnable = RunnableQueue.front();
+                 RunnableQueue.pop();
+                 nbWaitingRunnable--;
+             }
+
+             mutex.unlock();
              runnable->run();
+             mutex.lock();
+
+             first = false;
+
+             //Sortir de la boucle while
+             if(threadPoolFinish == true){
+                 mutex.unlock();
+                 break;
+             }
         }
     }
 
@@ -77,16 +126,20 @@ public:
      */
     bool start(Runnable* runnable) {
 
-        nbWaitingRunnable++;
+        mutex.lock();
 
         //-Si pas de thread dispo, pool plein et nbRequêtes qui attendent
         // dans la file d'attente > maxNbWaiting, on drop la requête
         if(nbWaitingRunnable > maxNbWaiting){
+            runnable->cancelRun();
+            mutex.unlock();
             return false;
         }
 
+
         //-Si un thread est en attente, on l'assigne
         if(nbWaitingThread > 0){
+            nbWaitingRunnable++;
             RunnableQueue.push(runnable);
 
             runnableIsWaiting = true;
@@ -96,24 +149,22 @@ public:
         //-Si pas de thread, on en créé un et on l'assigne
         else if(nbThread < maxThreadCount){
             nbThread++;
-            nbWaitingRunnable--;
-            threadQueue.push(new PcoThread (&ThreadPool::processRunnable, runnable));
+            runnableIsWaiting = true;
+            threadQueue.push_front(new PcoThread (&ThreadPool::processRunnable, this, runnable));
         }
 
         //-Si pas de thread dispo, pool plein et nbRequêtes qui attendent
         // dans la file d'attente < maxNbWaiting, on bloque
         // la requête le temps qu'un thread redevienne dispo
         else{
+            nbWaitingRunnable++;
             RunnableQueue.push(runnable);
         }
 
+        mutex.unlock();
+
         //Si la requête a été lancée (traitée), on retourne true
         return true;
-
-        //-Synchroniser les threads existants
-        //-Si on détruit le thread pool, on doit laisser tous les threads finirent
-        // leur calculs avant de se terminer, si un thread est en attente, on
-        // le réveille et on le termine.
 
         //TODO:
         // -Synchronisation avec mutex
@@ -123,24 +174,24 @@ public:
 private:
     //Nombre max de threads possibles dans le pool
     int maxThreadCount;
-
     //Nombre max de Runnable qui peuvent attendre dans la queue
     int maxNbWaiting;
 
     //Nombre de threads dans le pool
     int nbThread;
-
     //Nombre de threads attente dans le pool
     int nbWaitingThread;
-
     //Nombre de runnable en attente dans le pool
     int nbWaitingRunnable;
 
-    //Queue de pointeurs de Runnable pour les runnables en atente
-    std::queue<Runnable*> RunnableQueue;
+    //Indique à un thread réveillé qu'il doit se terminer tout de suite sans
+    //faire la suite de ses opérations (Lors de la destruction du threadPool)
+    bool threadPoolFinish;
 
+    //Queue de pointeurs de Runnable pour les runnables en atente (FIFO)
+    std::queue<Runnable*> RunnableQueue;
     //Queue pour stocker les threads du pool
-    std::queue<PcoThread*> threadQueue;
+    std::deque<PcoThread*> threadQueue;
 
     PcoMutex mutex;
     PcoConditionVariable cond;
