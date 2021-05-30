@@ -44,75 +44,85 @@ public:
 class ThreadPool
 {
 public:
+
+    /**
+     * @brief ThreadPool     Constructeur
+     * @param maxThreadCount Nombre maximal de threads dans le pool
+     * @param maxNbWaiting   Nombre maximal de Runnable en attente
+     */
     ThreadPool(int maxThreadCount, int maxNbWaiting)
         :nbThread(0), nbWaitingThread(0),nbWaitingRunnable(0),
-         threadPoolFinish(false), runnableIsWaiting(false)
+         threadPoolFinish(false)
     {
         this->maxThreadCount = maxThreadCount;
         this->maxNbWaiting = maxNbWaiting;
     }
 
+    /**
+     * @brief ~ThreadPool Destructeur
+     */
     ~ThreadPool(){
-        //-Si on détruit le thread pool, on doit laisser tous les threads finirent
-        // leur calculs avant de se terminer, si un thread est en attente, on
-        // le réveille et on le termine.
+        //Passe l'information aux thread que le programme se termine
         threadPoolFinish = true;
 
-        if(nbWaitingThread > 0){
-            cond.notifyAll();
+        //On relâche tous les threads en attente pour les terminer proprement
+        for(int i = 0; i < nbWaitingThread; ++i){
+            cond.notifyOne();
         }
 
+        //Terminaison des threads et suppression
         for(PcoThread* const &t: threadQueue){
             t->join();
             delete t;
         }
     }
 
-    void processRunnable(Runnable* runnable){
-        mutex.lock();
-        bool first = true;
-        mutex.unlock();
+    /**
+     * @brief processRunnable Utilisée par un thread pour traiter un runnable,
+     *                        chaque thread créé dans le Thread Pool va l'executer
+     */
+    void processRunnable(){
+        //Runnable traité par le thread
+        Runnable *currentRunnable;
 
         while(1){
-
              mutex.lock();
-             nbWaitingThread++;
-             mutex.unlock();
 
-             while(runnableIsWaiting == false){
+             //Incrémentation du nombre de thread en attente
+             nbWaitingThread++;
+
+             //Utilisation d'un moniteur de Mesa pour l'attente des threads
+             while(RunnableQueue.size() < 1 && threadPoolFinish == false){
                  cond.wait(&mutex);
              }
 
-             mutex.lock();
-
-             runnableIsWaiting = false;
-
+             //Le thread n'est plus en attente, on décrémente
              nbWaitingThread--;
 
-             //Sortir de la boucle while
+             //Sortir de la boucle while si le programme se termine et qu'aucun
+             //runnable n'est encore en attente
              if(threadPoolFinish == true && nbWaitingRunnable == 0){
                  mutex.unlock();
                  break;
              }
 
-             //Si c'est le premier thread, on va pas dans la Queue
-             if(first == false){
-                 runnable = RunnableQueue.front();
-                 RunnableQueue.pop();
-                 nbWaitingRunnable--;
-             }
+             //Traitement du runnable dans la file d'attente
+             currentRunnable = RunnableQueue.front();
+             RunnableQueue.pop();
+             nbWaitingRunnable--;
 
              mutex.unlock();
-             runnable->run();
+             //Lancement de la fonction du runnable
+             currentRunnable->run();
              mutex.lock();
 
-             first = false;
-
-             //Sortir de la boucle while
+             //Sortir de la boucle while, si le programme se termine
              if(threadPoolFinish == true){
                  mutex.unlock();
                  break;
              }
+
+             mutex.unlock();
         }
     }
 
@@ -128,36 +138,59 @@ public:
 
         mutex.lock();
 
-        //-Si pas de thread dispo, pool plein et nbRequêtes qui attendent
-        // dans la file d'attente > maxNbWaiting, on drop la requête
-        if(nbWaitingRunnable > maxNbWaiting){
+        //Si le nombre de runnable qui attendent dans la file d'attente >
+        //maxNbWaiting, on abandonne la requête
+        if(nbWaitingRunnable >= maxNbWaiting){
+
+            //Arrêt du runnable lancé
             runnable->cancelRun();
+
             mutex.unlock();
             return false;
         }
 
 
-        //-Si un thread est en attente, on l'assigne
+        //Si un thread est en attente, on met le runnable dans la file d'attente
+        //et on relâche un thread en attente
         if(nbWaitingThread > 0){
+
+            //Incrémentation du nombre de runnable en attente
             nbWaitingRunnable++;
+
+            //Ajout du runnable dans la file d'attente
             RunnableQueue.push(runnable);
 
-            runnableIsWaiting = true;
+            //Relâchement d'un thread en attente
             cond.notifyOne();
         }
 
-        //-Si pas de thread, on en créé un et on l'assigne
+        //Si pas de thread disponible, on en créé un
         else if(nbThread < maxThreadCount){
+
+            //Incrémentation du nombre de threads dans le Thread Pool ainsi que
+            //du nombre de runnable en attente
             nbThread++;
-            runnableIsWaiting = true;
-            threadQueue.push_front(new PcoThread (&ThreadPool::processRunnable, this, runnable));
+            nbWaitingRunnable++;
+
+            //Ajout du runnable dans la file d'attente
+            RunnableQueue.push(runnable);
+
+            //Création d'un thread
+            threadQueue.push_front(new PcoThread (&ThreadPool::processRunnable, this));
+
+            //Relâchement d'un thread en attente
+            cond.notifyOne();
         }
 
-        //-Si pas de thread dispo, pool plein et nbRequêtes qui attendent
-        // dans la file d'attente < maxNbWaiting, on bloque
-        // la requête le temps qu'un thread redevienne dispo
+        //Si pas de thread disponible, pool plein et nombre de runnable qui
+        //attendent dans la file d'attente > maxNbWaiting, on met le runnable
+        //dans la file d'attente qui sera traité lorsqu'un thread sera disponible
         else{
+
+            //Incrémentation du nombre de runnable en attente
             nbWaitingRunnable++;
+
+            //Ajout du runnable dans la file d'attente
             RunnableQueue.push(runnable);
         }
 
@@ -165,37 +198,58 @@ public:
 
         //Si la requête a été lancée (traitée), on retourne true
         return true;
-
-        //TODO:
-        // -Synchronisation avec mutex
-        // -Mettre la var condition runnableIsWaitingà false quelque part
     }
 
 private:
-    //Nombre max de threads possibles dans le pool
+    /*Nombre max de threads possibles dans le pool
+     *Utilisée par : start()   --> (Lecture)
+     *Protegée     : Par un PcoMutex mutex
+     */
     int maxThreadCount;
-    //Nombre max de Runnable qui peuvent attendre dans la queue
+
+    /*Nombre max de Runnable qui peuvent attendre dans la queue
+     *Utilisée par : start()   --> (Lecture)
+     *Protegée     : Par un PcoMutex mutex
+     */
     int maxNbWaiting;
 
-    //Nombre de threads dans le pool
+    /*Nombre de threads dans le pool
+     *Utilisée par : start()   --> (Lecture/Ecriture)
+     *Protegée     : Par un PcoMutex mutex
+     */
     int nbThread;
-    //Nombre de threads attente dans le pool
+
+    /*Nombre de threads attente dans le pool
+     *Utilisée par : start()             --> (Lecture)
+     *Utilisée par : processRunnable()   --> (Ecriture)
+     *Protegée     : Par un PcoMutex mutex
+     */
     int nbWaitingThread;
-    //Nombre de runnable en attente dans le pool
+
+    /*Nombre de runnable en attente dans le pool
+     *Utilisée par : start()             --> (Lecture/Ecriture)
+     *Utilisée par : processRunnable()   --> (Lecture/Ecriture)
+     *Protegée     : Par un PcoMutex mutex
+     */
     int nbWaitingRunnable;
 
-    //Indique à un thread réveillé qu'il doit se terminer tout de suite sans
-    //faire la suite de ses opérations (Lors de la destruction du threadPool)
+    /*Indique à un thread réveillé qu'il doit se terminer
+     *(Lors de la destruction du threadPool)
+     *Utilisée par : ~ThreadPool()       --> (Ecriture)
+     *Utilisée par : processRunnable()   --> (Lecture)
+     *Protegée     : Par un PcoMutex mutex
+     */
     bool threadPoolFinish;
 
     //Queue de pointeurs de Runnable pour les runnables en atente (FIFO)
     std::queue<Runnable*> RunnableQueue;
-    //Queue pour stocker les threads du pool
+    //Deque pour stocker les threads du pool
     std::deque<PcoThread*> threadQueue;
 
+    //Mutex pour la protection des variables partagées
     PcoMutex mutex;
+    //Variable de condition pour le moniteur de Mesa
     PcoConditionVariable cond;
-    bool runnableIsWaiting;
 };
 
 #endif // THREADPOOL_H
