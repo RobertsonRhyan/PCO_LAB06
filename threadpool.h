@@ -66,8 +66,8 @@ public:
         threadPoolFinish = true;
 
         //On relâche tous les threads en attente pour les terminer proprement
-        for(int i = 0; i < nbWaitingThread; ++i){
-            cond.notifyOne();
+        if(nbWaitingThread > 0){
+            cond.notifyAll();
         }
 
         //Terminaison des threads et suppression
@@ -149,7 +149,6 @@ public:
             return false;
         }
 
-
         //Si un thread est en attente, on met le runnable dans la file d'attente
         //et on relâche un thread en attente
         if(nbWaitingThread > 0){
@@ -222,6 +221,7 @@ private:
     /*Nombre de threads attente dans le pool
      *Utilisée par : start()             --> (Lecture)
      *Utilisée par : processRunnable()   --> (Ecriture)
+     *Utilisée par : ~ThreadPool()       --> (Lecture)
      *Protegée     : Par un PcoMutex mutex
      */
     int nbWaitingThread;
