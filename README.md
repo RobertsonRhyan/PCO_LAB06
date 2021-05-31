@@ -32,7 +32,7 @@ Nous avons décomposé l'exécution du *Thread Pool* en 4 cas distincts afin de 
 * Si le nombre de *runnable* qui attendent dans la file d'attente est supérieur au nombre maximum de *runnable* autorisé dans la file d'attente, le *runnable* est alors abandonné (on stoppe l'exécution du *runnable* et on retourne *false*).
 * Si un thread est en attente, on met le *runnable* dans la file d'attente et on relâche directement un thread pour qu'une requête soit traitée immédiatement. 
 * Si aucun thread n'est disponible et que le *Thread Pool* n'est pas déjà plein, on peut créer un nouveau thread, mettre le *runnable* dans la file d'attente et relâcher directement le thread pour qu'une requête soit traitée immédiatement. 
-* Pour finir, si aucun thread n'est disponible, que le *Thread Pool* est déjà plein mais que la file d'attente de *runnable* n'est pas pleine, on met le *runnable* dans la file d'attente et il sera traité lorsqu'un thread sera disponible. 
+* Pour finir, si aucun thread n'est disponible, que le *Thread Pool* est déjà plein mais que la file d'attente de *runnable* n'est pas pleine, on bloque le caller jusqu'a qu'un thread soit disponible sinon on n'exécute pas la requête.
 
 #### Traitement d'une requête par un thread
 
