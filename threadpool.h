@@ -51,17 +51,7 @@ public:
 
         stop = true;
 
-        // Cancel waiting runnables
-        while(!runnableQueue.empty()){
-            runnableQueue.front()->cancelRun();
-            runnableQueue.pop();
-        }
-
-        // While there is waiting threads, notify them to continue.
-        while (nbWaitingThread > 0) {
-            // Notify all waiting threads to continue
-            waitForRunnable.notifyAll();
-        }
+        waitForRunnable.notifyAll();
 
         // Wait for all threads to terminate
         for(auto& thread: threads){
@@ -178,13 +168,15 @@ private:
 
             --nbWaitingThread;
 
+            if(stop){
+                mutex.unlock();
+                break;
+            }
+
             currentRunnable = runnableQueue.front();
             runnableQueue.pop();
 
             mutex.unlock();
-
-            if(stop)
-                break;
 
             currentRunnable->run();
 
