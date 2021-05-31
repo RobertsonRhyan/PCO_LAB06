@@ -18,6 +18,33 @@ L'implémentation va s'effectuer à l'aide d'**un moniteur de Mesa** pour la syn
 
 ### Implémentation
 
+**Gestion des requêtes dans le Thread Pool**
+
+La gestion du *Thread Pool* s'effectue dans la fonction `start(Runnable* runnable)` de la classe `ThreadPool`. Un *runnable* correspond à une requête à traiter par un thread.
+
+Nous avons décomposé l'exécution du *Thread Pool* en 4 cas distincts afin de gérer les threads et requêtes correctement lors de l'arrivée d'une nouvelle requête : 
+
+* Si le nombre de *runnable* qui attendent dans la file d'attente est supérieur au nombre maximum de *runnable* autorisé dans la file d'attente, le *runnable* est alors abandonné (on stoppe l'exécution du *runnable* et on retourne *false*).
+* Si un thread est en attente, on met le *runnable* dans la file d'attente et on relâche directement un thread pour qu'une requête soit traitée immédiatement. 
+* Si aucun thread n'est disponible et que le *Thread Pool* n'est pas déjà plein, on peut créer un nouveau thread, mettre le *runnable* dans la file d'attente et relâcher directement le thread pour qu'une requête soit traitée immédiatement. 
+* Pour finir, si aucun thread n'est disponible, que le *Thread Pool* est déjà plein mais que la file d'attente de *runnable* n'est pas pleine, on met le *runnable* dans la file d'attente et il sera traité lorsqu'un thread sera disponible. 
+
+
+
+**Traitement d'une requête par un thread**
+
+Le traitement d'une requête par un thread s'effectue dans une fonction `processRunnable()`.
+
+
+
+Utilisation de Mesa
+
+
+
+
+
+**Destruction du Thread Pool**
+
 
 
 

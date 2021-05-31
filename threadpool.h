@@ -182,7 +182,7 @@ public:
         }
 
         //Si pas de thread disponible, pool plein et nombre de runnable qui
-        //attendent dans la file d'attente > maxNbWaiting, on met le runnable
+        //attendent dans la file d'attente < maxNbWaiting, on met le runnable
         //dans la file d'attente qui sera traité lorsqu'un thread sera disponible
         else{
 
